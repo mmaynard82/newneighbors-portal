@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit_authenticator as stauth
 import gspread
 from google.oauth2.service_account import Credentials
-from streamlit_authenticator.utilities.hasher import Hasher   # New import for modern hashing
+from streamlit_authenticator.utilities.hasher import Hasher
 
 # ----------------------------- PAGE CONFIG -----------------------------
 st.set_page_config(page_title="New Neighbors Portal", layout="wide")
@@ -48,10 +48,12 @@ try:
     values = user_sheet.get_all_values()
     
     if not values or len(values) < 2:
-        st.warning("Users sheet is empty or has no data rows.")
+        st.warning("Users sheet is empty. Add users using the sidebar form.")
         names = usernames = passwords = []
     else:
-        df_raw = pd.DataFrame(values[1:], columns=[str(col).strip() for col in values[0]])
+        # Clean column names
+        headers = [str(col).strip() for col in values[0]]
+        df_raw = pd.DataFrame(values[1:], columns=headers)
         users_data = df_raw.copy()
         
         st.sidebar.info(f"Users sheet columns: {list(users_data.columns)}")
@@ -64,33 +66,34 @@ except Exception as e:
     st.error(f"Failed to load Users sheet: {e}")
     st.stop()
 
-# ----------------------------- HASH PASSWORDS (Modern way) -----------------------------
+# ----------------------------- HASH PASSWORDS -----------------------------
 if passwords:
-    hashed_passwords = Hasher(passwords).generate()   # Updated hashing method
+    hashed_passwords = Hasher(passwords).generate()
 else:
     hashed_passwords = []
 
-# ----------------------------- CREATE CREDENTIALS DICT (New recommended way) -----------------------------
+# ----------------------------- CREDENTIALS DICT -----------------------------
 credentials = {
     "usernames": {
-        username: {
-            "name": name,
-            "password": hashed_password
-        }
-        for username, name, hashed_password in zip(usernames, names, hashed_passwords)
+        user: {"name": name, "password": pwd}
+        for user, name, pwd in zip(usernames, names, hashed_passwords)
     }
 }
 
-# ----------------------------- AUTHENTICATOR (Updated constructor) -----------------------------
+# ----------------------------- AUTHENTICATOR -----------------------------
 authenticator = stauth.Authenticate(
     credentials=credentials,
     cookie_name="portal_cookie",
-    cookie_key="abc123",           # Change this to a strong random key in production
+    cookie_key="abc123",          # Change this to a strong random string in production
     cookie_expiry_days=1
 )
 
-# Updated login call
-name, authentication_status, username = authenticator.login(location="main")
+# ----------------------------- LOGIN (Fixed for latest version) -----------------------------
+authentication_status = authenticator.login(location="main")
+
+# Get name and username from session state (new behavior)
+name = st.session_state.get("name")
+username = st.session_state.get("username")
 
 # ----------------------------- HEALTH SCORE -----------------------------
 def get_health_score(status):
@@ -150,7 +153,7 @@ if authentication_status:
             if new_name and new_username and new_password:
                 try:
                     user_sheet.append_row([new_name, new_username, new_password])
-                    st.success("✅ Client added successfully! Refresh the app to log in.")
+                    st.success("✅ Client added! Refresh the page to log in with the new account.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to add client: {e}")
@@ -159,5 +162,5 @@ if authentication_status:
 
 elif authentication_status == False:
     st.error("❌ Incorrect username or password")
-elif authentication_status is None:
+else:
     st.warning("Please enter your login details")
