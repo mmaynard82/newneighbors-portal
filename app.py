@@ -5,7 +5,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_authenticator.utilities.hasher import Hasher
 
-# Page config
 st.set_page_config(page_title="New Neighbors Portal", layout="wide")
 
 st.markdown("""
@@ -16,7 +15,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
 col1, col2 = st.columns([1, 5])
 with col1:
     st.image("logo.png", width=90)
@@ -24,8 +22,8 @@ with col2:
     st.title("New Neighbors Property Portal")
     st.caption("Property Monitoring Dashboard")
 
-# Google Sheets Connection
-@st.cache_resource(show_spinner="Connecting to Google Sheets...")
+# Google Sheets
+@st.cache_resource
 def get_gspread_client():
     creds_info = st.secrets["gcp_service_account"]
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -39,7 +37,7 @@ try:
     user_sheet = client.open("Users").sheet1
     values = user_sheet.get_all_values()
     if not values or len(values) < 2:
-        st.warning("No users yet. Add some using the sidebar form below.")
+        st.warning("No users yet – add some using the sidebar form.")
         names = usernames = passwords = []
     else:
         headers = [str(col).strip() for col in values[0]]
@@ -49,69 +47,32 @@ try:
         usernames = users_data["Username"].dropna().astype(str).tolist()
         passwords = users_data["Password"].dropna().astype(str).tolist()
 except Exception as e:
-    st.error(f"Failed to load Users sheet: {e}")
+    st.error(f"Users load error: {e}")
     st.stop()
 
-# Setup Authenticator
+# Auth Setup
 hashed_passwords = Hasher(passwords).generate() if passwords else []
 credentials = {"usernames": {u: {"name": n, "password": p} for u, n, p in zip(usernames, names, hashed_passwords)}}
 
 authenticator = stauth.Authenticate(
     credentials=credentials,
     cookie_name="portal_cookie",
-    cookie_key="change_this_to_a_very_long_random_string_123456789",
+    cookie_key="super_secret_random_key_change_this_2026",
     cookie_expiry_days=1
 )
 
-# Login Form
+# Login
 authentication_status = authenticator.login(location="main")
 
-name = st.session_state.get("name")
-username = st.session_state.get("username")
-
-def get_health_score(status):
-    status = str(status).lower()
-    if status == "excellent": return 95
-    elif status == "good": return 85
-    elif status == "needs attention": return 70
-    elif status == "critical": return 50
-    return 75
-
-# ===================== MAIN APP - ONLY RUNS AFTER LOGIN =====================
+# ======================= LOGGED IN SECTION =======================
 if authentication_status:
-    # Logout button is now 100% safe here
-    authenticator.logout("Logout", "sidebar")
+    authenticator.logout("Logout", "sidebar")   # ← Safe here only
     
     st.sidebar.image("logo.png", width=120)
-    st.sidebar.write(f"**Welcome {name}**")
+    st.sidebar.write(f"**Welcome {st.session_state.get('name')}**")
 
-    # Your Properties
-    try:
-        report_sheet = client.open("Reports").sheet1
-        values = report_sheet.get_all_values()
-        data = pd.DataFrame(values[1:], columns=[str(c).strip() for c in values[0]]) if values else pd.DataFrame()
-
-        user_data = data[data.get("Client", pd.Series()).astype(str).str.lower() == str(username).lower()]
-
-        st.subheader("📍 Your Properties")
-        if user_data.empty:
-            st.info("No properties found for your account yet.")
-        else:
-            for _, row in user_data.iterrows():
-                score = get_health_score(row.get("Status", ""))
-                st.markdown("---")
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.subheader(f"🏡 {row.get('Property', 'Unknown Property')}")
-                    st.write(f"📅 Last Visit: {row.get('Date', 'N/A')}")
-                    st.write(f"📊 Status: {row.get('Status', 'N/A')}")
-                    if row.get("Report"):
-                        st.link_button("📄 View Report", row["Report"])
-                with col2:
-                    st.metric("🏠 Health Score", f"{score}/100")
-                    st.progress(score / 100)
-    except Exception as e:
-        st.error(f"Could not load Reports: {e}")
+    st.subheader("📍 Your Properties")
+    st.info("Reports section will appear here once you have data in the Reports sheet.")
 
     # Add Client Form
     st.sidebar.markdown("---")
@@ -123,10 +84,10 @@ if authentication_status:
         if st.form_submit_button("Create Client"):
             if new_name and new_username and new_password:
                 user_sheet.append_row([new_name, new_username, new_password])
-                st.success("✅ Client added successfully! Refresh the page to log in.")
+                st.success("✅ Client added! Refresh page.")
                 st.rerun()
             else:
-                st.error("Please fill all three fields.")
+                st.error("Fill all fields")
 
 elif authentication_status == False:
     st.error("❌ Incorrect username or password")
