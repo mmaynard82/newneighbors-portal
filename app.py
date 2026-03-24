@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_authenticator.utilities.hasher import Hasher
 
+# Page config
 st.set_page_config(page_title="New Neighbors Portal", layout="wide")
 
 st.markdown("""
@@ -38,7 +39,7 @@ try:
     user_sheet = client.open("Users").sheet1
     values = user_sheet.get_all_values()
     if not values or len(values) < 2:
-        st.warning("Users sheet is empty. Add users via the sidebar.")
+        st.warning("No users yet. Add some using the sidebar form below.")
         names = usernames = passwords = []
     else:
         headers = [str(col).strip() for col in values[0]]
@@ -48,21 +49,21 @@ try:
         usernames = users_data["Username"].dropna().astype(str).tolist()
         passwords = users_data["Password"].dropna().astype(str).tolist()
 except Exception as e:
-    st.error(f"Failed to load Users: {e}")
+    st.error(f"Failed to load Users sheet: {e}")
     st.stop()
 
-# Authenticator Setup
+# Setup Authenticator
 hashed_passwords = Hasher(passwords).generate() if passwords else []
 credentials = {"usernames": {u: {"name": n, "password": p} for u, n, p in zip(usernames, names, hashed_passwords)}}
 
 authenticator = stauth.Authenticate(
     credentials=credentials,
     cookie_name="portal_cookie",
-    cookie_key="abc123_super_secret_change_me_in_production",
+    cookie_key="change_this_to_a_very_long_random_string_123456789",
     cookie_expiry_days=1
 )
 
-# Login
+# Login Form
 authentication_status = authenticator.login(location="main")
 
 name = st.session_state.get("name")
@@ -76,15 +77,15 @@ def get_health_score(status):
     elif status == "critical": return 50
     return 75
 
-# ==================== ONLY SHOW CONTENT WHEN LOGGED IN ====================
+# ===================== MAIN APP - ONLY RUNS AFTER LOGIN =====================
 if authentication_status:
-    # Logout button - safely placed here
+    # Logout button is now 100% safe here
     authenticator.logout("Logout", "sidebar")
     
     st.sidebar.image("logo.png", width=120)
     st.sidebar.write(f"**Welcome {name}**")
 
-    # Reports
+    # Your Properties
     try:
         report_sheet = client.open("Reports").sheet1
         values = report_sheet.get_all_values()
@@ -110,9 +111,9 @@ if authentication_status:
                     st.metric("🏠 Health Score", f"{score}/100")
                     st.progress(score / 100)
     except Exception as e:
-        st.error(f"Reports error: {e}")
+        st.error(f"Could not load Reports: {e}")
 
-    # Add Client
+    # Add Client Form
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
     with st.sidebar.form("add_user", clear_on_submit=True):
@@ -122,10 +123,10 @@ if authentication_status:
         if st.form_submit_button("Create Client"):
             if new_name and new_username and new_password:
                 user_sheet.append_row([new_name, new_username, new_password])
-                st.success("✅ Client added! Refresh page to log in.")
+                st.success("✅ Client added successfully! Refresh the page to log in.")
                 st.rerun()
             else:
-                st.error("Please fill all fields")
+                st.error("Please fill all three fields.")
 
 elif authentication_status == False:
     st.error("❌ Incorrect username or password")
