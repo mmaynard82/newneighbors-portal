@@ -36,52 +36,34 @@ def get_gspread_client():
         return gspread.authorize(credentials)
     except Exception as e:
         st.error("❌ Failed to connect to Google Sheets")
-        st.error(f"Error: {str(e)}")
-        st.info("Make sure your secrets are correctly added under **[gcp_service_account]**")
+        st.error(str(e))
+        st.info("Check your Secrets under [gcp_service_account]")
         st.stop()
 
 client = get_gspread_client()
 
-# ----------------------------- LOAD USERS (Robust Version) -----------------------------
+# ----------------------------- LOAD USERS (Exact match for your sheet) -----------------------------
 try:
     user_sheet = client.open("Users").sheet1
     users_data = pd.DataFrame(user_sheet.get_all_records())
 
-    # Show actual columns in sidebar for debugging
-    st.sidebar.info(f"Users sheet columns found: {list(users_data.columns)}")
+    # Show columns in sidebar for debugging
+    st.sidebar.info(f"Users sheet columns: {list(users_data.columns)}")
 
-    # Flexible column detection (case-insensitive)
-    def find_column(df, possible_names):
-        for col in df.columns:
-            if str(col).strip().lower() in [name.lower() for name in possible_names]:
-                return col
-        return None
-
-    name_col = find_column(users_data, ["Name", "Full Name", "Client Name", "name"])
-    username_col = find_column(users_data, ["Username", "User", "Email", "username"])
-    password_col = find_column(users_data, ["Password", "Pass", "Pwd", "password"])
-
-    if not name_col or not username_col or not password_col:
-        st.error("❌ Users sheet is missing required columns.")
-        st.error("Please make sure your 'Users' sheet has columns for: **Name**, **Username**, and **Password**")
-        st.info(f"Found columns: {list(users_data.columns)}")
-        st.stop()
-
-    names = users_data[name_col].dropna().tolist()
-    usernames = users_data[username_col].dropna().tolist()
-    passwords = users_data[password_col].dropna().tolist()
+    # Exact column names from your sheet
+    names = users_data["Name"].dropna().astype(str).tolist()
+    usernames = users_data["Username"].dropna().astype(str).tolist()
+    passwords = users_data["Password"].dropna().astype(str).tolist()
 
     if len(names) == 0:
-        st.warning("No users found in the Users sheet. Please add some users first.")
-        names = []
-        usernames = []
-        passwords = []
+        st.warning("No users found in the 'Users' sheet. Add some users using the sidebar form.")
+        names = usernames = passwords = []
 
 except Exception as e:
     st.error(f"Failed to load Users sheet: {e}")
     st.stop()
 
-# Hash passwords
+# ----------------------------- AUTHENTICATOR -----------------------------
 hashed_passwords = stauth.Hasher().hash_list(passwords)
 
 authenticator = stauth.Authenticate(
@@ -100,7 +82,7 @@ def get_health_score(status):
     elif status == "critical": return 50
     return 75
 
-# ----------------------------- AUTH SUCCESS -----------------------------
+# ----------------------------- MAIN APP AFTER LOGIN -----------------------------
 if auth_status:
     authenticator.logout("Logout", "sidebar")
     st.sidebar.image("logo.png", width=120)
@@ -110,18 +92,24 @@ if auth_status:
     try:
         report_sheet = client.open("Reports").sheet1
         data = pd.DataFrame(report_sheet.get_all_records())
-        user_data = data[data["Client"].str.lower() == username.lower()] if "Client" in data.columns else pd.DataFrame()
+
+        # Filter for current user (make "Client" column case-insensitive)
+        if "Client" in data.columns:
+            user_data = data[data["Client"].astype(str).str.lower() == username.lower()]
+        else:
+            user_data = pd.DataFrame()
+            st.warning("No 'Client' column found in Reports sheet.")
 
         st.subheader("📍 Your Properties")
         if user_data.empty:
             st.info("No properties found for your account yet.")
         else:
             for _, row in user_data.iterrows():
-                score = get_health_score(row.get("Status", "Good"))
+                score = get_health_score(row.get("Status", ""))
                 st.markdown("---")
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.subheader(f"🏡 {row.get('Property', 'Unknown Property')}")
+                    st.subheader(f"🏡 {row.get('Property', 'Unknown')}")
                     st.write(f"📅 Last Visit: {row.get('Date', 'N/A')}")
                     st.write(f"📊 Status: {row.get('Status', 'N/A')}")
                     if row.get("Report"):
@@ -130,26 +118,26 @@ if auth_status:
                     st.metric("🏠 Health Score", f"{score}/100")
                     st.progress(score / 100)
     except Exception as e:
-        st.error(f"Could not load Reports sheet: {e}")
+        st.error(f"Could not load Reports: {e}")
 
-    # ----------------------------- ADD CLIENT -----------------------------
+    # ----------------------------- ADD NEW CLIENT -----------------------------
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
     with st.sidebar.form("add_user"):
         new_name = st.text_input("Name")
         new_username = st.text_input("Username")
         new_password = st.text_input("Password", type="password")
+        
         if st.form_submit_button("Create Client"):
             if new_name and new_username and new_password:
                 try:
-                    # Append in the order of actual columns
                     user_sheet.append_row([new_name, new_username, new_password])
                     st.success("✅ Client added successfully!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to add client: {e}")
             else:
-                st.error("Please fill all fields")
+                st.error("Please fill all three fields")
 
 elif auth_status == False:
     st.error("❌ Incorrect username or password")
