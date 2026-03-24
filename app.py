@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import streamlit_authenticator as stauth
 import gspread
-from google.oauth2.service_account import Credentials  # Modern replacement
+from google.oauth2.service_account import Credentials
 
 # ----------------------------- PAGE CONFIG -----------------------------
 st.set_page_config(page_title="New Neighbors Portal", layout="wide")
@@ -18,21 +18,32 @@ st.markdown("""
 # ----------------------------- HEADER -----------------------------
 col1, col2 = st.columns([1, 5])
 with col1:
-    st.image("logo.png", width=90)   # Make sure logo.png is in the repo
+    st.image("logo.png", width=90)
 with col2:
     st.title("New Neighbors Property Portal")
     st.caption("Property Monitoring Dashboard")
 
-# ----------------------------- GOOGLE SHEETS CONNECTION (using Secrets) -----------------------------
-@st.cache_resource
+# ----------------------------- GOOGLE SHEETS CONNECTION -----------------------------
+@st.cache_resource(show_spinner="Connecting to Google Sheets...")
 def get_gspread_client():
-    creds_dict = dict(st.secrets["gcp_service_account"])   # We'll add this in Streamlit Secrets
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
-    return gspread.authorize(credentials)
+    try:
+        # This is the correct way to read the secrets on Streamlit Cloud
+        creds_info = st.secrets["gcp_service_account"]
+        
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        
+        credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
+        client = gspread.authorize(credentials)
+        return client
+    except Exception as e:
+        st.error("❌ Failed to connect to Google Sheets")
+        st.error(f"Error: {str(e)}")
+        st.info("💡 Make sure you added the secrets correctly in Streamlit Cloud → Settings → Secrets")
+        st.info("The section must be named **[gcp_service_account]**")
+        st.stop()
 
 client = get_gspread_client()
 
@@ -96,5 +107,14 @@ if auth_status:
         new_username = st.text_input("Username")
         new_password = st.text_input("Password", type="password")
         if st.form_submit_button("Create Client"):
-            user_sheet.append_row([new_name, new_username, new_password])
-            st.success("✅ Client added!")
+            try:
+                user_sheet.append_row([new_name, new_username, new_password])
+                st.success("✅ Client added successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to add client: {e}")
+
+elif auth_status == False:
+    st.error("❌ Incorrect username or password")
+elif auth_status == None:
+    st.warning("Please enter login details")
