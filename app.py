@@ -51,12 +51,12 @@ def load_users():
 
 users_df = load_users()
 
-# ================== AUTH SETUP ==================
+# ================== AUTH ==================
 credentials = {
     "usernames": {
         row["Username"]: {
             "name": row["Name"],
-            "password": row["Password"]  # already hashed
+            "password": row["Password"]  # must be hashed in sheet
         }
         for _, row in users_df.iterrows()
     }
@@ -69,13 +69,13 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=1
 )
 
-# ================== LOGIN ==================
-name, authentication_status, username = authenticator.login("Login", "main")
+# ================== LOGIN (FIXED ORDER) ==================
+name, authentication_status, username = authenticator.login("main", "Login")
 
-# ================== MAIN APP ==================
+# ================== APP ==================
 if authentication_status is True:
 
-    # Logout (safe)
+    # ✅ SAFE logout
     authenticator.logout("Logout", "sidebar")
 
     st.sidebar.image("logo.png", width=120)
@@ -91,10 +91,10 @@ if authentication_status is True:
         else:
             prop_df = pd.DataFrame()
 
-    except:
+    except Exception:
         prop_df = pd.DataFrame()
 
-    # ================== FILTER USER DATA ==================
+    # ================== FILTER ==================
     if not prop_df.empty and "Username" in prop_df.columns:
         user_props = prop_df[prop_df["Username"] == username]
     else:
@@ -108,7 +108,7 @@ if authentication_status is True:
     else:
         st.info("No properties assigned yet.")
 
-    # ================== ADD CLIENT (ADMIN USE) ==================
+    # ================== ADD USER ==================
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
 
@@ -126,9 +126,9 @@ if authentication_status is True:
                 hashed_pw = Hasher([new_password]).generate()[0]
 
                 user_sheet.append_row([new_name, new_username, hashed_pw])
+
                 st.success("✅ Client added! Refresh page.")
                 st.rerun()
-
             else:
                 st.error("Fill all fields")
 
