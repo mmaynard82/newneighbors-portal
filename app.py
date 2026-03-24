@@ -27,18 +27,10 @@ with col2:
 # ----------------------------- GOOGLE SHEETS CONNECTION -----------------------------
 @st.cache_resource(show_spinner="Connecting to Google Sheets...")
 def get_gspread_client():
-    try:
-        creds_info = st.secrets["gcp_service_account"]
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
-        return gspread.authorize(credentials)
-    except Exception as e:
-        st.error("❌ Failed to connect to Google Sheets")
-        st.error(str(e))
-        st.stop()
+    creds_info = st.secrets["gcp_service_account"]
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
+    return gspread.authorize(credentials)
 
 client = get_gspread_client()
 
@@ -48,31 +40,25 @@ try:
     values = user_sheet.get_all_values()
     
     if not values or len(values) < 2:
-        st.warning("Users sheet is empty. Add users using the sidebar form.")
+        st.warning("Users sheet is empty. Add users via the sidebar.")
         names = usernames = passwords = []
     else:
-        # Clean column names
         headers = [str(col).strip() for col in values[0]]
-        df_raw = pd.DataFrame(values[1:], columns=headers)
-        users_data = df_raw.copy()
+        users_data = pd.DataFrame(values[1:], columns=headers)
         
-        st.sidebar.info(f"Users sheet columns: {list(users_data.columns)}")
+        st.sidebar.info(f"Columns: {list(users_data.columns)}")
         
         names = users_data["Name"].dropna().astype(str).tolist()
         usernames = users_data["Username"].dropna().astype(str).tolist()
         passwords = users_data["Password"].dropna().astype(str).tolist()
 
 except Exception as e:
-    st.error(f"Failed to load Users sheet: {e}")
+    st.error(f"Failed to load Users: {e}")
     st.stop()
 
-# ----------------------------- HASH PASSWORDS -----------------------------
-if passwords:
-    hashed_passwords = Hasher(passwords).generate()
-else:
-    hashed_passwords = []
+# ----------------------------- HASH & CREDENTIALS -----------------------------
+hashed_passwords = Hasher(passwords).generate() if passwords else []
 
-# ----------------------------- CREDENTIALS DICT -----------------------------
 credentials = {
     "usernames": {
         user: {"name": name, "password": pwd}
@@ -80,18 +66,16 @@ credentials = {
     }
 }
 
-# ----------------------------- AUTHENTICATOR -----------------------------
 authenticator = stauth.Authenticate(
     credentials=credentials,
     cookie_name="portal_cookie",
-    cookie_key="abc123",          # Change this to a strong random string in production
+    cookie_key="abc123",          # Change this later to a strong random key
     cookie_expiry_days=1
 )
 
-# ----------------------------- LOGIN (Fixed for latest version) -----------------------------
+# ----------------------------- LOGIN -----------------------------
 authentication_status = authenticator.login(location="main")
 
-# Get name and username from session state (new behavior)
 name = st.session_state.get("name")
 username = st.session_state.get("username")
 
@@ -104,18 +88,20 @@ def get_health_score(status):
     elif status == "critical": return 50
     return 75
 
-# ----------------------------- MAIN APP -----------------------------
+# ----------------------------- MAIN CONTENT -----------------------------
 if authentication_status:
+    # Logout button - ONLY shown when logged in
     authenticator.logout("Logout", "sidebar")
+    
     st.sidebar.image("logo.png", width=120)
     st.sidebar.write(f"Welcome {name}")
 
-    # Load Reports
+    # Reports Section
     try:
         report_sheet = client.open("Reports").sheet1
-        report_values = report_sheet.get_all_values()
-        if report_values:
-            data = pd.DataFrame(report_values[1:], columns=[str(c).strip() for c in report_values[0]])
+        values = report_sheet.get_all_values()
+        if values:
+            data = pd.DataFrame(values[1:], columns=[str(c).strip() for c in values[0]])
         else:
             data = pd.DataFrame()
 
@@ -130,7 +116,7 @@ if authentication_status:
                 st.markdown("---")
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.subheader(f"🏡 {row.get('Property', 'Unknown Property')}")
+                    st.subheader(f"🏡 {row.get('Property', 'Unknown')}")
                     st.write(f"📅 Last Visit: {row.get('Date', 'N/A')}")
                     st.write(f"📊 Status: {row.get('Status', 'N/A')}")
                     if row.get("Report"):
@@ -139,26 +125,22 @@ if authentication_status:
                     st.metric("🏠 Health Score", f"{score}/100")
                     st.progress(score / 100)
     except Exception as e:
-        st.error(f"Could not load Reports sheet: {e}")
+        st.error(f"Reports error: {e}")
 
-    # ----------------------------- ADD CLIENT -----------------------------
+    # Add Client Form
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
     with st.sidebar.form("add_user"):
         new_name = st.text_input("Name")
         new_username = st.text_input("Username")
         new_password = st.text_input("Password", type="password")
-        
         if st.form_submit_button("Create Client"):
             if new_name and new_username and new_password:
-                try:
-                    user_sheet.append_row([new_name, new_username, new_password])
-                    st.success("✅ Client added! Refresh the page to log in with the new account.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to add client: {e}")
+                user_sheet.append_row([new_name, new_username, new_password])
+                st.success("✅ Client added! Refresh page to login.")
+                st.rerun()
             else:
-                st.error("Please fill all fields")
+                st.error("Fill all fields")
 
 elif authentication_status == False:
     st.error("❌ Incorrect username or password")
