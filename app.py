@@ -37,26 +37,38 @@ def get_gspread_client():
     except Exception as e:
         st.error("❌ Failed to connect to Google Sheets")
         st.error(str(e))
-        st.info("Check your Secrets under [gcp_service_account]")
         st.stop()
 
 client = get_gspread_client()
 
-# ----------------------------- LOAD USERS (Exact match for your sheet) -----------------------------
+# ----------------------------- LOAD USERS (Robust & Clean Version) -----------------------------
 try:
     user_sheet = client.open("Users").sheet1
-    users_data = pd.DataFrame(user_sheet.get_all_records())
+    
+    # Use get_all_values() for more reliability
+    values = user_sheet.get_all_values()
+    
+    if not values:
+        st.error("Users sheet is empty!")
+        st.stop()
+    
+    # Create DataFrame and clean column names (remove extra spaces)
+    df_raw = pd.DataFrame(values[1:], columns=values[0])   # First row = headers
+    users_data = df_raw.copy()
+    
+    # Clean column names: strip whitespace
+    users_data.columns = [str(col).strip() for col in users_data.columns]
+    
+    # Show exact cleaned columns in sidebar
+    st.sidebar.info(f"Cleaned columns: {list(users_data.columns)}")
 
-    # Show columns in sidebar for debugging
-    st.sidebar.info(f"Users sheet columns: {list(users_data.columns)}")
-
-    # Exact column names from your sheet
+    # Access columns safely
     names = users_data["Name"].dropna().astype(str).tolist()
     usernames = users_data["Username"].dropna().astype(str).tolist()
     passwords = users_data["Password"].dropna().astype(str).tolist()
 
     if len(names) == 0:
-        st.warning("No users found in the 'Users' sheet. Add some users using the sidebar form.")
+        st.warning("No users found in the Users sheet yet. Use the sidebar form to add some.")
         names = usernames = passwords = []
 
 except Exception as e:
@@ -82,7 +94,7 @@ def get_health_score(status):
     elif status == "critical": return 50
     return 75
 
-# ----------------------------- MAIN APP AFTER LOGIN -----------------------------
+# ----------------------------- MAIN APP -----------------------------
 if auth_status:
     authenticator.logout("Logout", "sidebar")
     st.sidebar.image("logo.png", width=120)
@@ -91,14 +103,13 @@ if auth_status:
     # Load Reports
     try:
         report_sheet = client.open("Reports").sheet1
-        data = pd.DataFrame(report_sheet.get_all_records())
-
-        # Filter for current user (make "Client" column case-insensitive)
-        if "Client" in data.columns:
-            user_data = data[data["Client"].astype(str).str.lower() == username.lower()]
+        report_values = report_sheet.get_all_values()
+        if report_values:
+            data = pd.DataFrame(report_values[1:], columns=[str(c).strip() for c in report_values[0]])
         else:
-            user_data = pd.DataFrame()
-            st.warning("No 'Client' column found in Reports sheet.")
+            data = pd.DataFrame()
+
+        user_data = data[data.get("Client", pd.Series()).astype(str).str.lower() == username.lower()]
 
         st.subheader("📍 Your Properties")
         if user_data.empty:
@@ -109,7 +120,7 @@ if auth_status:
                 st.markdown("---")
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.subheader(f"🏡 {row.get('Property', 'Unknown')}")
+                    st.subheader(f"🏡 {row.get('Property', 'Unknown Property')}")
                     st.write(f"📅 Last Visit: {row.get('Date', 'N/A')}")
                     st.write(f"📊 Status: {row.get('Status', 'N/A')}")
                     if row.get("Report"):
@@ -118,9 +129,9 @@ if auth_status:
                     st.metric("🏠 Health Score", f"{score}/100")
                     st.progress(score / 100)
     except Exception as e:
-        st.error(f"Could not load Reports: {e}")
+        st.error(f"Could not load Reports sheet: {e}")
 
-    # ----------------------------- ADD NEW CLIENT -----------------------------
+    # ----------------------------- ADD CLIENT -----------------------------
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
     with st.sidebar.form("add_user"):
@@ -135,9 +146,9 @@ if auth_status:
                     st.success("✅ Client added successfully!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Failed to add client: {e}")
+                    st.error(f"Failed to add: {e}")
             else:
-                st.error("Please fill all three fields")
+                st.error("Please fill all fields")
 
 elif auth_status == False:
     st.error("❌ Incorrect username or password")
