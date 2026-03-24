@@ -28,7 +28,10 @@ with col2:
 @st.cache_resource(show_spinner="Connecting to Google Sheets...")
 def get_gspread_client():
     creds_info = st.secrets["gcp_service_account"]
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
     credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
     return gspread.authorize(credentials)
 
@@ -40,23 +43,23 @@ try:
     values = user_sheet.get_all_values()
     
     if not values or len(values) < 2:
-        st.warning("Users sheet is empty. Add users via the sidebar.")
+        st.warning("No users in sheet yet. Add some using the sidebar form.")
         names = usernames = passwords = []
     else:
         headers = [str(col).strip() for col in values[0]]
         users_data = pd.DataFrame(values[1:], columns=headers)
         
-        st.sidebar.info(f"Columns: {list(users_data.columns)}")
+        st.sidebar.info(f"Columns found: {list(users_data.columns)}")
         
         names = users_data["Name"].dropna().astype(str).tolist()
         usernames = users_data["Username"].dropna().astype(str).tolist()
         passwords = users_data["Password"].dropna().astype(str).tolist()
 
 except Exception as e:
-    st.error(f"Failed to load Users: {e}")
+    st.error(f"Failed to load Users sheet: {e}")
     st.stop()
 
-# ----------------------------- HASH & CREDENTIALS -----------------------------
+# ----------------------------- HASH PASSWORDS & CREDENTIALS -----------------------------
 hashed_passwords = Hasher(passwords).generate() if passwords else []
 
 credentials = {
@@ -66,10 +69,11 @@ credentials = {
     }
 }
 
+# ----------------------------- AUTHENTICATOR -----------------------------
 authenticator = stauth.Authenticate(
     credentials=credentials,
     cookie_name="portal_cookie",
-    cookie_key="abc123",          # Change this later to a strong random key
+    cookie_key="abc123_super_secret_change_me",   # ← Change this to a long random string later
     cookie_expiry_days=1
 )
 
@@ -88,15 +92,15 @@ def get_health_score(status):
     elif status == "critical": return 50
     return 75
 
-# ----------------------------- MAIN CONTENT -----------------------------
+# ----------------------------- MAIN APP -----------------------------
 if authentication_status:
-    # Logout button - ONLY shown when logged in
+    # ✅ Logout button ONLY appears when user is logged in
     authenticator.logout("Logout", "sidebar")
     
     st.sidebar.image("logo.png", width=120)
-    st.sidebar.write(f"Welcome {name}")
+    st.sidebar.write(f"**Welcome {name}**")
 
-    # Reports Section
+    # Load Reports
     try:
         report_sheet = client.open("Reports").sheet1
         values = report_sheet.get_all_values()
@@ -116,7 +120,7 @@ if authentication_status:
                 st.markdown("---")
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.subheader(f"🏡 {row.get('Property', 'Unknown')}")
+                    st.subheader(f"🏡 {row.get('Property', 'Unknown Property')}")
                     st.write(f"📅 Last Visit: {row.get('Date', 'N/A')}")
                     st.write(f"📊 Status: {row.get('Status', 'N/A')}")
                     if row.get("Report"):
@@ -125,9 +129,9 @@ if authentication_status:
                     st.metric("🏠 Health Score", f"{score}/100")
                     st.progress(score / 100)
     except Exception as e:
-        st.error(f"Reports error: {e}")
+        st.error(f"Could not load Reports: {e}")
 
-    # Add Client Form
+    # ----------------------------- ADD CLIENT -----------------------------
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
     with st.sidebar.form("add_user"):
@@ -137,12 +141,12 @@ if authentication_status:
         if st.form_submit_button("Create Client"):
             if new_name and new_username and new_password:
                 user_sheet.append_row([new_name, new_username, new_password])
-                st.success("✅ Client added! Refresh page to login.")
+                st.success("✅ Client added! Refresh the page to log in.")
                 st.rerun()
             else:
-                st.error("Fill all fields")
+                st.error("Please fill all fields")
 
 elif authentication_status == False:
     st.error("❌ Incorrect username or password")
 else:
-    st.warning("Please enter your login details")
+    st.warning("👤 Please enter your login details")
