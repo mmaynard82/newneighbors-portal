@@ -1,5 +1,5 @@
 streamlit
 pandas
+streamlit-authenticator==0.3.3   # or try 0.4.2 if you want the absolute latest
 gspread
-streamlit_authenticator
 google-auth
