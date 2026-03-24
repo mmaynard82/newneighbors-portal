@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit_authenticator as stauth
 import gspread
 from google.oauth2.service_account import Credentials
+from streamlit_authenticator.utilities.hasher import Hasher   # New import for modern hashing
 
 # ----------------------------- PAGE CONFIG -----------------------------
 st.set_page_config(page_title="New Neighbors Portal", layout="wide")
@@ -41,49 +42,55 @@ def get_gspread_client():
 
 client = get_gspread_client()
 
-# ----------------------------- LOAD USERS (Robust & Clean Version) -----------------------------
+# ----------------------------- LOAD USERS -----------------------------
 try:
     user_sheet = client.open("Users").sheet1
-    
-    # Use get_all_values() for more reliability
     values = user_sheet.get_all_values()
     
-    if not values:
-        st.error("Users sheet is empty!")
-        st.stop()
-    
-    # Create DataFrame and clean column names (remove extra spaces)
-    df_raw = pd.DataFrame(values[1:], columns=values[0])   # First row = headers
-    users_data = df_raw.copy()
-    
-    # Clean column names: strip whitespace
-    users_data.columns = [str(col).strip() for col in users_data.columns]
-    
-    # Show exact cleaned columns in sidebar
-    st.sidebar.info(f"Cleaned columns: {list(users_data.columns)}")
-
-    # Access columns safely
-    names = users_data["Name"].dropna().astype(str).tolist()
-    usernames = users_data["Username"].dropna().astype(str).tolist()
-    passwords = users_data["Password"].dropna().astype(str).tolist()
-
-    if len(names) == 0:
-        st.warning("No users found in the Users sheet yet. Use the sidebar form to add some.")
+    if not values or len(values) < 2:
+        st.warning("Users sheet is empty or has no data rows.")
         names = usernames = passwords = []
+    else:
+        df_raw = pd.DataFrame(values[1:], columns=[str(col).strip() for col in values[0]])
+        users_data = df_raw.copy()
+        
+        st.sidebar.info(f"Users sheet columns: {list(users_data.columns)}")
+        
+        names = users_data["Name"].dropna().astype(str).tolist()
+        usernames = users_data["Username"].dropna().astype(str).tolist()
+        passwords = users_data["Password"].dropna().astype(str).tolist()
 
 except Exception as e:
     st.error(f"Failed to load Users sheet: {e}")
     st.stop()
 
-# ----------------------------- AUTHENTICATOR -----------------------------
-hashed_passwords = stauth.Hasher().hash_list(passwords)
+# ----------------------------- HASH PASSWORDS (Modern way) -----------------------------
+if passwords:
+    hashed_passwords = Hasher(passwords).generate()   # Updated hashing method
+else:
+    hashed_passwords = []
 
+# ----------------------------- CREATE CREDENTIALS DICT (New recommended way) -----------------------------
+credentials = {
+    "usernames": {
+        username: {
+            "name": name,
+            "password": hashed_password
+        }
+        for username, name, hashed_password in zip(usernames, names, hashed_passwords)
+    }
+}
+
+# ----------------------------- AUTHENTICATOR (Updated constructor) -----------------------------
 authenticator = stauth.Authenticate(
-    names, usernames, hashed_passwords,
-    "portal_cookie", "abc123", cookie_expiry_days=1
+    credentials=credentials,
+    cookie_name="portal_cookie",
+    cookie_key="abc123",           # Change this to a strong random key in production
+    cookie_expiry_days=1
 )
 
-name, auth_status, username = authenticator.login("Client Login", "main")
+# Updated login call
+name, authentication_status, username = authenticator.login(location="main")
 
 # ----------------------------- HEALTH SCORE -----------------------------
 def get_health_score(status):
@@ -95,7 +102,7 @@ def get_health_score(status):
     return 75
 
 # ----------------------------- MAIN APP -----------------------------
-if auth_status:
+if authentication_status:
     authenticator.logout("Logout", "sidebar")
     st.sidebar.image("logo.png", width=120)
     st.sidebar.write(f"Welcome {name}")
@@ -109,7 +116,7 @@ if auth_status:
         else:
             data = pd.DataFrame()
 
-        user_data = data[data.get("Client", pd.Series()).astype(str).str.lower() == username.lower()]
+        user_data = data[data.get("Client", pd.Series()).astype(str).str.lower() == str(username).lower()]
 
         st.subheader("📍 Your Properties")
         if user_data.empty:
@@ -143,14 +150,14 @@ if auth_status:
             if new_name and new_username and new_password:
                 try:
                     user_sheet.append_row([new_name, new_username, new_password])
-                    st.success("✅ Client added successfully!")
+                    st.success("✅ Client added successfully! Refresh the app to log in.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Failed to add: {e}")
+                    st.error(f"Failed to add client: {e}")
             else:
                 st.error("Please fill all fields")
 
-elif auth_status == False:
+elif authentication_status == False:
     st.error("❌ Incorrect username or password")
-elif auth_status is None:
+elif authentication_status is None:
     st.warning("Please enter your login details")
