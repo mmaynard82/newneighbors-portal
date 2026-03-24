@@ -5,7 +5,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_authenticator.utilities.hasher import Hasher
 
-# ----------------------------- PAGE CONFIG -----------------------------
 st.set_page_config(page_title="New Neighbors Portal", layout="wide")
 
 st.markdown("""
@@ -16,7 +15,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ----------------------------- HEADER -----------------------------
+# Header
 col1, col2 = st.columns([1, 5])
 with col1:
     st.image("logo.png", width=90)
@@ -24,66 +23,51 @@ with col2:
     st.title("New Neighbors Property Portal")
     st.caption("Property Monitoring Dashboard")
 
-# ----------------------------- GOOGLE SHEETS CONNECTION -----------------------------
+# Google Sheets Connection
 @st.cache_resource(show_spinner="Connecting to Google Sheets...")
 def get_gspread_client():
     creds_info = st.secrets["gcp_service_account"]
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
     return gspread.authorize(credentials)
 
 client = get_gspread_client()
 
-# ----------------------------- LOAD USERS -----------------------------
+# Load Users
 try:
     user_sheet = client.open("Users").sheet1
     values = user_sheet.get_all_values()
-    
     if not values or len(values) < 2:
-        st.warning("No users in sheet yet. Add some using the sidebar form.")
+        st.warning("Users sheet is empty. Add users via the sidebar.")
         names = usernames = passwords = []
     else:
         headers = [str(col).strip() for col in values[0]]
         users_data = pd.DataFrame(values[1:], columns=headers)
-        
-        st.sidebar.info(f"Columns found: {list(users_data.columns)}")
-        
+        st.sidebar.info(f"Columns: {list(users_data.columns)}")
         names = users_data["Name"].dropna().astype(str).tolist()
         usernames = users_data["Username"].dropna().astype(str).tolist()
         passwords = users_data["Password"].dropna().astype(str).tolist()
-
 except Exception as e:
-    st.error(f"Failed to load Users sheet: {e}")
+    st.error(f"Failed to load Users: {e}")
     st.stop()
 
-# ----------------------------- HASH PASSWORDS & CREDENTIALS -----------------------------
+# Authenticator Setup
 hashed_passwords = Hasher(passwords).generate() if passwords else []
+credentials = {"usernames": {u: {"name": n, "password": p} for u, n, p in zip(usernames, names, hashed_passwords)}}
 
-credentials = {
-    "usernames": {
-        user: {"name": name, "password": pwd}
-        for user, name, pwd in zip(usernames, names, hashed_passwords)
-    }
-}
-
-# ----------------------------- AUTHENTICATOR -----------------------------
 authenticator = stauth.Authenticate(
     credentials=credentials,
     cookie_name="portal_cookie",
-    cookie_key="abc123_super_secret_change_me",   # ← Change this to a long random string later
+    cookie_key="abc123_super_secret_change_me_in_production",
     cookie_expiry_days=1
 )
 
-# ----------------------------- LOGIN -----------------------------
+# Login
 authentication_status = authenticator.login(location="main")
 
 name = st.session_state.get("name")
 username = st.session_state.get("username")
 
-# ----------------------------- HEALTH SCORE -----------------------------
 def get_health_score(status):
     status = str(status).lower()
     if status == "excellent": return 95
@@ -92,22 +76,19 @@ def get_health_score(status):
     elif status == "critical": return 50
     return 75
 
-# ----------------------------- MAIN APP -----------------------------
+# ==================== ONLY SHOW CONTENT WHEN LOGGED IN ====================
 if authentication_status:
-    # ✅ Logout button ONLY appears when user is logged in
+    # Logout button - safely placed here
     authenticator.logout("Logout", "sidebar")
     
     st.sidebar.image("logo.png", width=120)
     st.sidebar.write(f"**Welcome {name}**")
 
-    # Load Reports
+    # Reports
     try:
         report_sheet = client.open("Reports").sheet1
         values = report_sheet.get_all_values()
-        if values:
-            data = pd.DataFrame(values[1:], columns=[str(c).strip() for c in values[0]])
-        else:
-            data = pd.DataFrame()
+        data = pd.DataFrame(values[1:], columns=[str(c).strip() for c in values[0]]) if values else pd.DataFrame()
 
         user_data = data[data.get("Client", pd.Series()).astype(str).str.lower() == str(username).lower()]
 
@@ -129,19 +110,19 @@ if authentication_status:
                     st.metric("🏠 Health Score", f"{score}/100")
                     st.progress(score / 100)
     except Exception as e:
-        st.error(f"Could not load Reports: {e}")
+        st.error(f"Reports error: {e}")
 
-    # ----------------------------- ADD CLIENT -----------------------------
+    # Add Client
     st.sidebar.markdown("---")
     st.sidebar.subheader("➕ Add Client")
-    with st.sidebar.form("add_user"):
+    with st.sidebar.form("add_user", clear_on_submit=True):
         new_name = st.text_input("Name")
         new_username = st.text_input("Username")
         new_password = st.text_input("Password", type="password")
         if st.form_submit_button("Create Client"):
             if new_name and new_username and new_password:
                 user_sheet.append_row([new_name, new_username, new_password])
-                st.success("✅ Client added! Refresh the page to log in.")
+                st.success("✅ Client added! Refresh page to log in.")
                 st.rerun()
             else:
                 st.error("Please fill all fields")
