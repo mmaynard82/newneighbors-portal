@@ -1,5 +1,5 @@
 streamlit==1.33.0
-streamlit-authenticator==0.3.2
+streamlit-authenticator==0.2.3
 gspread
 google-auth
 pandas
