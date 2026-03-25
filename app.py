@@ -45,7 +45,6 @@ client = get_gspread_client()
 @st.cache_data(ttl=30)
 def load_users():
     try:
-        # CHANGE THIS URL ONLY IF YOUR USERS SHEET ID CHANGES
         spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms")
         st.sidebar.success("✅ Connected to Users spreadsheet")
         
@@ -94,7 +93,7 @@ for _, row in users_df.iterrows():
 authenticator = stauth.Authenticate(
     credentials,
     cookie_name="new_neighbors_portal",
-    cookie_key="NewNeighborsPortal2026_x7K9pL2mQ8vR4tY6uZ3wA5bC7dE9fG1hJ",   # Change this to your own long random string
+    cookie_key="NewNeighborsPortal2026_x7K9pL2mQ8vR4tY6uZ3wA5bC7dE9fG1hJ",
     cookie_expiry_days=7,
     auto_hash=False
 )
@@ -102,9 +101,9 @@ authenticator = stauth.Authenticate(
 # ================== LOGIN ==================
 name, authentication_status, username = authenticator.login("main", "Login")
 
-# ================== RE-HASH BUTTON (Force re-hash) ==================
+# ================== FORCE RE-HASH BUTTON ==================
 st.sidebar.markdown("### 🔧 Admin Tools")
-if st.sidebar.button("🔐 Force Re-hash ALL passwords (even if they look hashed)"):
+if st.sidebar.button("🔐 Force Re-hash ALL passwords"):
     with st.spinner("Forcing re-hash on all passwords..."):
         try:
             url = "https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms"
@@ -112,51 +111,58 @@ if st.sidebar.button("🔐 Force Re-hash ALL passwords (even if they look hashed
             data = sheet.get_all_values()
             
             if len(data) < 2:
-                st.sidebar.error("No users found")
-                return
-            
-            headers = data[0]
-            rows = data[1:]
-            
-            try:
-                pw_idx = headers.index("Password")
-            except ValueError:
-                st.sidebar.error("Password column not found")
-                return
-            
-            updated_rows = []
-            changed_count = 0
-            
-            for row in rows:
-                new_row = list(row)
-                current_pw = str(new_row[pw_idx]).strip()
+                st.sidebar.error("No users found in sheet")
+            else:
+                headers = data[0]
+                rows = data[1:]
                 
-                # FORCE hash this time (ignore previous check)
-                if current_pw:   # only if there's something in the cell
-                    try:
-                        new_hash = stauth.Hasher([current_pw]).generate()[0]
-                        new_row[pw_idx] = new_hash
-                        changed_count += 1
-                    except Exception as hash_err:
-                        st.sidebar.warning(f"Failed to hash: {hash_err}")
+                try:
+                    pw_idx = headers.index("Password")
+                except ValueError:
+                    st.sidebar.error("Password column not found")
+                    st.stop()
                 
-                updated_rows.append(new_row)
-            
-            # Update the sheet
-            sheet.clear()
-            sheet.update([headers] + updated_rows)
-            
-            st.sidebar.success(f"✅ Force re-hashed {changed_count} password(s)!")
-            st.cache_data.clear()
-            st.rerun()
-            
+                updated_rows = []
+                changed_count = 0
+                
+                for row in rows:
+                    new_row = list(row)
+                    current_pw = str(new_row[pw_idx]).strip()
+                    
+                    if current_pw:  # if cell is not empty
+                        try:
+                            new_hash = stauth.Hasher([current_pw]).generate()[0]
+                            new_row[pw_idx] = new_hash
+                            changed_count += 1
+                        except:
+                            pass
+                    
+                    updated_rows.append(new_row)
+                
+                # Update sheet
+                sheet.clear()
+                sheet.update([headers] + updated_rows)
+                
+                st.sidebar.success(f"✅ Force re-hashed {changed_count} password(s)!")
+                st.cache_data.clear()
+                st.rerun()
+                
         except Exception as e:
-            st.sidebar.error(f"Force re-hash failed: {str(e)}")
+            st.sidebar.error(f"Re-hash failed: {str(e)}")
+
+# ================== MAIN APP AFTER LOGIN ==================
+if authentication_status:
+    authenticator.logout("Logout", "sidebar")
     
-    # Load Properties
+    st.sidebar.image("logo.png", width=120)
+    st.sidebar.write(f"**Welcome, {name}**")
+    
+    role = credentials["usernames"][username]["role"]
+    
+    # Load Properties (replace URL if different)
     try:
-        # Replace with your Properties sheet URL if different
-        prop_spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/18A7jnCqSsk1ojD5Wr_66BlmOK3kGZl0P1sn2zRMhgD8/edit?gid=0#gid=0")
+        prop_url = "https://docs.google.com/spreadsheets/d/18A7jnCqSsk1ojD5Wr_66BlmOK3kGZl0P1sn2zRMhgD8/edit?gid=0#gid=0"  # ← CHANGE THIS
+        prop_spreadsheet = client.open_by_url(prop_url)
         prop_values = prop_spreadsheet.sheet1.get_all_values()
         if len(prop_values) > 1:
             prop_df = pd.DataFrame(prop_values[1:], columns=prop_values[0])
@@ -166,7 +172,6 @@ if st.sidebar.button("🔐 Force Re-hash ALL passwords (even if they look hashed
         st.warning("Could not load Properties sheet.")
         prop_df = pd.DataFrame()
     
-    # Filter by role
     if role == "client" and not prop_df.empty and "Username" in prop_df.columns:
         user_props = prop_df[prop_df["Username"] == username]
     else:
@@ -178,7 +183,7 @@ if st.sidebar.button("🔐 Force Re-hash ALL passwords (even if they look hashed
     else:
         st.info("No properties assigned to you yet.")
     
-    # Admin: Add User
+    # Admin: Add New User
     if role == "admin":
         st.sidebar.markdown("---")
         st.sidebar.subheader("➕ Add New User")
@@ -206,6 +211,3 @@ elif authentication_status is False:
     st.error("❌ Incorrect username or password")
 elif authentication_status is None:
     st.warning("👤 Please enter your login details")
-
-# Footer
-st.caption("New Neighbors Property Portal • Secure Login via Google Sheets")
