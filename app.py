@@ -52,24 +52,37 @@ def load_users():
 
 users_df = load_users()
 
-# ================== BUILD CREDENTIALS (with debug) ==================
+# ================== BUILD CREDENTIALS WITH FULL DEBUG ==================
 credentials = {"usernames": {}}
 
-st.sidebar.markdown("### Debug Info")
+st.sidebar.markdown("### 🔍 Debug Info (very important)")
+
 for idx, row in users_df.iterrows():
-    username = str(row.get("Username", "")).strip()
-    if not username:
-        continue
+    raw_username = row.get("Username", "")
+    username = str(raw_username).strip()
     
-    password = str(row.get("Password", "")).strip()
+    raw_password = row.get("Password", "")
+    password_hash = str(raw_password).strip()
+    
     name = str(row.get("Name", username)).strip()
     role = str(row.get("Role", "client")).strip().lower()
     
-    st.sidebar.write(f"User found → **{username}** | Hash starts with: `{password[:20]}`...")
+    if not username:
+        st.sidebar.warning(f"Row {idx+2}: Empty username")
+        continue
+    
+    st.sidebar.write(f"**User {idx+1}:** `{username}` | Name: `{name}` | Role: `{role}`")
+    st.sidebar.write(f"   Hash starts with: `{password_hash[:30]}`... (length: {len(password_hash)})")
+    
+    # Check if hash looks valid
+    if password_hash.startswith("$2b$") or password_hash.startswith("$2a$") or password_hash.startswith("$2y$"):
+        st.sidebar.success("   → Hash looks valid")
+    else:
+        st.sidebar.error("   → Hash does NOT look valid!")
     
     credentials["usernames"][username] = {
         "name": name,
-        "password": password,
+        "password": password_hash,
         "role": role
     }
 
@@ -85,7 +98,7 @@ authenticator = stauth.Authenticate(
 # ================== LOGIN ==================
 name, authentication_status, username = authenticator.login("main", "Login")
 
-# ================== FORCE RE-HASH ==================
+# Force Re-hash Button
 st.sidebar.markdown("### 🔧 Admin Tools")
 if st.sidebar.button("🔐 Force Re-hash ALL passwords"):
     with st.spinner("Re-hashing..."):
@@ -118,17 +131,13 @@ if authentication_status:
     authenticator.logout("Logout", "sidebar")
     st.sidebar.image("logo.png", width=120)
     st.sidebar.write(f"**Welcome, {name}**")
+    st.success(f"✅ Logged in successfully as **{username}**")
     
-    role = credentials["usernames"][username]["role"]
-    
-    st.success(f"Logged in as **{username}** ({role})")
-    
-    # Properties code here (you can keep your old one)
-    st.subheader("📍 My Properties")
-    st.info("Properties loading... (add your code here)")
+    # Add your Properties code here later
 
 elif authentication_status is False:
     st.error("❌ Incorrect username or password")
-    st.sidebar.error("Login failed - check debug info above")
+    st.sidebar.error("Login failed — check the Debug Info above for clues")
+
 elif authentication_status is None:
     st.warning("👤 Please enter your login details")
