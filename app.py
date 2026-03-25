@@ -41,20 +41,37 @@ def get_gspread_client():
 
 client = get_gspread_client()
 
-# ================== LOAD USERS ==================
-@st.cache_data(ttl=60)   # refresh every 60 seconds
+# ================== LOAD USERS WITH BETTER DEBUGGING ==================
+@st.cache_data(ttl=30)
 def load_users():
     try:
-        user_sheet = client.open("Users").sheet1
-        values = user_sheet.get_all_values()
-        if not values or len(values) < 2:
+        # Try to open the sheet
+        spreadsheet = client.open("Users")
+        st.sidebar.success("✅ Connected to 'Users' spreadsheet")
+        
+        worksheet = spreadsheet.sheet1
+        values = worksheet.get_all_values()
+        
+        if not values:
+            st.sidebar.warning("Sheet is empty")
+            return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
+        
+        if len(values) < 2:
+            st.sidebar.warning("Sheet has headers but no data rows")
             return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
         
         headers = [str(c).strip() for c in values[0]]
         df = pd.DataFrame(values[1:], columns=headers)
+        
+        st.sidebar.info(f"Loaded {len(df)} users from sheet")
         return df
+        
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error("❌ Spreadsheet named **'Users'** not found. Check the exact name (case-sensitive).")
+        return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
     except Exception as e:
-        st.error(f"Could not load Users sheet: {e}")
+        st.error(f"❌ Error loading Users sheet: {str(e)}")
+        st.sidebar.error(f"Debug: {type(e).__name__} - {str(e)}")
         return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
 
 users_df = load_users()
