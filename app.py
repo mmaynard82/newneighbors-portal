@@ -93,6 +93,103 @@ authenticator = stauth.Authenticate(
 # ================== LOGIN ==================
 name, authentication_status, username = authenticator.login("main", "Login")
 
+# ================== RE-HASH BUTTON (visible even before login) ==================
+st.sidebar.markdown("### 🔧 Admin Tools")
+if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
+    with st.spinner("Re-hashing passwords... Do not close the page"):
+        try:
+            sheet = client.open("Users").sheet1
+            data = sheet.get_all_values()
+            if len(data) < 2:
+                st.sidebar.error("No users found in sheet")
+            else:
+                headers = data[0]
+                rows = data[1:]
+                try:
+                    pw_idx = headers.index("Password")
+                except ValueError:
+                    st.sidebar.error("Password column not found")
+                    pw_idx = None
+                
+                if pw_idx is not None:
+                    updated = []
+                    for row in rows:
+                        new_row = list(row)
+                        current_pw = str(new_row[pw_idx]).strip()
+                        if not (current_pw.startswith("$2") and len(current_pw) > 50):
+                            try:
+                                new_hash = stauth.Hasher([current_pw]).generate()[0]
+                                new_row[pw_idx] = new_hash
+                            except:
+                                pass
+                        updated.append(new_row)
+                    
+                    sheet.clear()
+                    sheet.update([headers] + updated)
+                    st.sidebar.success("✅ All passwords re-hashed successfully!")
+                    st.cache_data.clear()
+                    st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
+
+# ================== MAIN APP AFTER LOGIN ==================
+if authentication_status:
+    authenticator.logout("Logout", "sidebar")
+    
+    st.sidebar.image("logo.png", width=120)
+    st.sidebar.write(f"**Welcome, {name}**")
+    
+    role = credentials["usernames"][username]["role"]
+    
+    # Load and display properties (your existing code)
+    try:
+        prop_sheet = client.open("Properties").sheet1
+        prop_values = prop_sheet.get_all_values()
+        if len(prop_values) > 1:
+            prop_df = pd.DataFrame(prop_values[1:], columns=prop_values[0])
+        else:
+            prop_df = pd.DataFrame()
+    except Exception:
+        prop_df = pd.DataFrame()
+    
+    if role == "client" and not prop_df.empty and "Username" in prop_df.columns:
+        user_props = prop_df[prop_df["Username"] == username]
+    else:
+        user_props = prop_df.copy()
+    
+    st.subheader("📍 My Properties")
+    if not user_props.empty:
+        st.dataframe(user_props, use_container_width=True)
+    else:
+        st.info("No properties assigned to you yet.")
+    
+    # Admin add user form (still only for logged-in admin)
+    if role == "admin":
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("➕ Add New User")
+        with st.sidebar.form("add_user_form", clear_on_submit=True):
+            new_name = st.text_input("Full Name")
+            new_username = st.text_input("Username")
+            new_password = st.text_input("Password", type="password")
+            new_role = st.selectbox("Role", ["client", "admin"])
+            if st.form_submit_button("Create User"):
+                if new_name and new_username and new_password:
+                    if new_username in credentials["usernames"]:
+                        st.error("Username already exists!")
+                    else:
+                        hashed_pw = stauth.Hasher([new_password]).generate()[0]
+                        user_sheet = client.open("Users").sheet1
+                        user_sheet.append_row([new_name, new_username, hashed_pw, new_role])
+                        st.success(f"✅ User **{new_username}** created!")
+                        st.cache_data.clear()
+                        st.rerun()
+                else:
+                    st.error("Please fill all fields")
+
+elif authentication_status is False:
+    st.error("❌ Incorrect username or password")
+elif authentication_status is None:
+    st.warning("👤 Please enter your login details")
 # ================== MAIN APP ==================
 if authentication_status:
     authenticator.logout("Logout", "sidebar")
