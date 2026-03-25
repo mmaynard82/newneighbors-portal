@@ -105,10 +105,10 @@ name, authentication_status, username = authenticator.login("main", "Login")
 # ================== RE-HASH BUTTON (visible before login) ==================
 st.sidebar.markdown("### 🔧 Admin Tools")
 if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
-    with st.spinner("Re-hashing passwords... Please wait"):
+    with st.spinner("Re-hashing passwords... This may take a few seconds"):
         try:
-            # Use the same URL as above
-            sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms").sheet1
+            url = "https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms"
+            sheet = client.open_by_url(url).sheet1
             data = sheet.get_all_values()
             
             if len(data) < 2:
@@ -116,31 +116,39 @@ if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
             else:
                 headers = data[0]
                 rows = data[1:]
+                pw_idx = None
                 try:
                     pw_idx = headers.index("Password")
                 except ValueError:
                     st.sidebar.error("Password column not found")
-                    pw_idx = None
                 
                 if pw_idx is not None:
-                    updated = []
+                    updated_rows = []
+                    changed_count = 0
+                    
                     for row in rows:
                         new_row = list(row)
                         current_pw = str(new_row[pw_idx]).strip()
-                        # Hash only if it's not already a bcrypt hash
+                        
+                        # Only hash if it doesn't look like a bcrypt hash already
                         if not (current_pw.startswith("$2") and len(current_pw) > 50):
-                            new_hash = stauth.Hasher([current_pw]).generate()[0]
-                            new_row[pw_idx] = new_hash
-                        updated.append(new_row)
+                            try:
+                                new_hash = stauth.Hasher([current_pw]).generate()[0]
+                                new_row[pw_idx] = new_hash
+                                changed_count += 1
+                            except:
+                                pass
+                        updated_rows.append(new_row)
                     
+                    # Better update method
                     sheet.clear()
-                    sheet.update([headers] + updated)
-                    st.sidebar.success("✅ All passwords re-hashed successfully!")
+                    sheet.update([headers] + updated_rows)
+                    
+                    st.sidebar.success(f"✅ Re-hashed {changed_count} password(s) successfully!")
                     st.cache_data.clear()
                     st.rerun()
         except Exception as e:
-            st.sidebar.error(f"Re-hash failed: {e}")
-
+            st.sidebar.error(f"Re-hash failed: {str(e)}")
 # ================== MAIN APP ==================
 if authentication_status:
     authenticator.logout("Logout", "sidebar")
