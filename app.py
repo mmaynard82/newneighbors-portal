@@ -52,49 +52,29 @@ def load_users():
 
 users_df = load_users()
 
-# ================== BUILD CREDENTIALS WITH FULL DEBUG ==================
+# ================== BUILD CREDENTIALS ==================
+# Ensure 'usernames' is the top-level key
 credentials = {"usernames": {}}
 
-st.sidebar.markdown("### 🔍 Debug Info (very important)")
-
 for idx, row in users_df.iterrows():
-    raw_username = row.get("Username", "")
-    username = str(raw_username).strip()
+    username = str(row.get("Username", "")).strip()
+    password_hash = str(row.get("Password", "")).strip()
     
-    raw_password = row.get("Password", "")
-    password_hash = str(raw_password).strip()
-    
-    name = str(row.get("Name", username)).strip()
-    role = str(row.get("Role", "client")).strip().lower()
-    
-    if not username:
-        st.sidebar.warning(f"Row {idx+2}: Empty username")
-        continue
-    
-    st.sidebar.write(f"**User {idx+1}:** `{username}` | Name: `{name}` | Role: `{role}`")
-    st.sidebar.write(f"   Hash starts with: `{password_hash[:30]}`... (length: {len(password_hash)})")
-    
-    # Check if hash looks valid
-    if password_hash.startswith("$2b$") or password_hash.startswith("$2a$") or password_hash.startswith("$2y$"):
-        st.sidebar.success("   → Hash looks valid")
-    else:
-        st.sidebar.error("   → Hash does NOT look valid!")
-    
-    credentials["usernames"][username] = {
-        "name": name,
-        "password": password_hash,
-        "role": role
-    }
+    if username:
+        credentials["usernames"][username] = {
+            "name": str(row.get("Name", username)).strip(),
+            "password": password_hash,
+            "email": "user@example.com" # Some versions require an email field
+        }
 
 # ================== AUTHENTICATOR ==================
 authenticator = stauth.Authenticate(
-    credentials,
-    cookie_name="new_neighbors_portal",
-    cookie_key="NewNeighborsPortal2026_x7K9pL2mQ8vR4tY6uZ3wA5bC7dE9fG1hJ",
-    cookie_expiry_days=7,
-    auto_hash=False
+    credentials, # Pass the WHOLE dictionary
+    "new_neighbors_portal", # cookie name
+    "signature_key", # cookie key
+    30, # cookie expiry
+    auto_hash=False # Keep this False since you are hashing manually
 )
-
 # ================== LOGIN ==================
 name, authentication_status, username = authenticator.login("main", "Login")
 
