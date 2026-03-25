@@ -41,34 +41,27 @@ def get_gspread_client():
 
 client = get_gspread_client()
 
-# ================== LOAD USERS WITH BETTER DEBUGGING ==================
+# ================== LOAD USERS ==================
 @st.cache_data(ttl=30)
 def load_users():
     try:
-        # Try to open the sheet
-        spreadsheet = client.open("Users")
-        st.sidebar.success("✅ Connected to 'Users' spreadsheet")
+        # CHANGE THIS URL ONLY IF YOUR USERS SHEET ID CHANGES
+        spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms")
+        st.sidebar.success("✅ Connected to Users spreadsheet")
         
         worksheet = spreadsheet.sheet1
         values = worksheet.get_all_values()
         
-        if not values:
-            st.sidebar.warning("Sheet is empty")
-            return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
-        
-        if len(values) < 2:
-            st.sidebar.warning("Sheet has headers but no data rows")
+        if not values or len(values) < 2:
+            st.sidebar.warning("Users sheet is empty or has no data rows")
             return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
         
         headers = [str(c).strip() for c in values[0]]
         df = pd.DataFrame(values[1:], columns=headers)
         
-        st.sidebar.info(f"Loaded {len(df)} users from sheet")
+        st.sidebar.success(f"✅ Loaded {len(df)} users")
         return df
         
-    except gspread.exceptions.SpreadsheetNotFound:
-        st.error("❌ Spreadsheet named **'Users'** not found. Check the exact name (case-sensitive).")
-        return pd.DataFrame(columns=["Name", "Username", "Password", "Role"])
     except Exception as e:
         st.error(f"❌ Error loading Users sheet: {str(e)}")
         st.sidebar.error(f"Debug: {type(e).__name__} - {str(e)}")
@@ -76,7 +69,7 @@ def load_users():
 
 users_df = load_users()
 
-# ================== BUILD CREDENTIALS DICT ==================
+# ================== BUILD CREDENTIALS ==================
 credentials = {"usernames": {}}
 
 for _, row in users_df.iterrows():
@@ -88,9 +81,8 @@ for _, row in users_df.iterrows():
     name = str(row.get("Name", username)).strip()
     role = str(row.get("Role", "client")).strip().lower()
     
-    # Warn if password doesn't look like a bcrypt hash
     if not (password.startswith("$2b$") or password.startswith("$2a$") or password.startswith("$2y$")):
-        st.warning(f"⚠️ Password for user **{username}** is not hashed. Login will fail until re-hashed.")
+        st.warning(f"⚠️ Password for user **{username}** is not hashed yet.")
     
     credentials["usernames"][username] = {
         "name": name,
@@ -102,21 +94,23 @@ for _, row in users_df.iterrows():
 authenticator = stauth.Authenticate(
     credentials,
     cookie_name="new_neighbors_portal",
-    cookie_key="NewNeighborsPortal2026_x7K9pL2mQ8vR4tY6uZ3wA5bC7dE9fG1hJ",  # ← CHANGE THIS!
+    cookie_key="NewNeighborsPortal2026_x7K9pL2mQ8vR4tY6uZ3wA5bC7dE9fG1hJ",   # Change this to your own long random string
     cookie_expiry_days=7,
-    auto_hash=False                     # Important: we pre-hash manually
+    auto_hash=False
 )
 
 # ================== LOGIN ==================
 name, authentication_status, username = authenticator.login("main", "Login")
 
-# ================== RE-HASH BUTTON (visible even before login) ==================
+# ================== RE-HASH BUTTON (visible before login) ==================
 st.sidebar.markdown("### 🔧 Admin Tools")
 if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
-    with st.spinner("Re-hashing passwords... Do not close the page"):
+    with st.spinner("Re-hashing passwords... Please wait"):
         try:
-            sheet = client.open("Users").sheet1
+            # Use the same URL as above
+            sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms").sheet1
             data = sheet.get_all_values()
+            
             if len(data) < 2:
                 st.sidebar.error("No users found in sheet")
             else:
@@ -133,12 +127,10 @@ if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
                     for row in rows:
                         new_row = list(row)
                         current_pw = str(new_row[pw_idx]).strip()
+                        # Hash only if it's not already a bcrypt hash
                         if not (current_pw.startswith("$2") and len(current_pw) > 50):
-                            try:
-                                new_hash = stauth.Hasher([current_pw]).generate()[0]
-                                new_row[pw_idx] = new_hash
-                            except:
-                                pass
+                            new_hash = stauth.Hasher([current_pw]).generate()[0]
+                            new_row[pw_idx] = new_hash
                         updated.append(new_row)
                     
                     sheet.clear()
@@ -147,66 +139,8 @@ if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
                     st.cache_data.clear()
                     st.rerun()
         except Exception as e:
-            st.sidebar.error(f"Error: {e}")
+            st.sidebar.error(f"Re-hash failed: {e}")
 
-# ================== MAIN APP AFTER LOGIN ==================
-if authentication_status:
-    authenticator.logout("Logout", "sidebar")
-    
-    st.sidebar.image("logo.png", width=120)
-    st.sidebar.write(f"**Welcome, {name}**")
-    
-    role = credentials["usernames"][username]["role"]
-    
-    # Load and display properties (your existing code)
-    try:
-        prop_sheet = client.open("Properties").sheet1
-        prop_values = prop_sheet.get_all_values()
-        if len(prop_values) > 1:
-            prop_df = pd.DataFrame(prop_values[1:], columns=prop_values[0])
-        else:
-            prop_df = pd.DataFrame()
-    except Exception:
-        prop_df = pd.DataFrame()
-    
-    if role == "client" and not prop_df.empty and "Username" in prop_df.columns:
-        user_props = prop_df[prop_df["Username"] == username]
-    else:
-        user_props = prop_df.copy()
-    
-    st.subheader("📍 My Properties")
-    if not user_props.empty:
-        st.dataframe(user_props, use_container_width=True)
-    else:
-        st.info("No properties assigned to you yet.")
-    
-    # Admin add user form (still only for logged-in admin)
-    if role == "admin":
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("➕ Add New User")
-        with st.sidebar.form("add_user_form", clear_on_submit=True):
-            new_name = st.text_input("Full Name")
-            new_username = st.text_input("Username")
-            new_password = st.text_input("Password", type="password")
-            new_role = st.selectbox("Role", ["client", "admin"])
-            if st.form_submit_button("Create User"):
-                if new_name and new_username and new_password:
-                    if new_username in credentials["usernames"]:
-                        st.error("Username already exists!")
-                    else:
-                        hashed_pw = stauth.Hasher([new_password]).generate()[0]
-                        user_sheet = client.open("Users").sheet1
-                        user_sheet.append_row([new_name, new_username, hashed_pw, new_role])
-                        st.success(f"✅ User **{new_username}** created!")
-                        st.cache_data.clear()
-                        st.rerun()
-                else:
-                    st.error("Please fill all fields")
-
-elif authentication_status is False:
-    st.error("❌ Incorrect username or password")
-elif authentication_status is None:
-    st.warning("👤 Please enter your login details")
 # ================== MAIN APP ==================
 if authentication_status:
     authenticator.logout("Logout", "sidebar")
@@ -214,13 +148,13 @@ if authentication_status:
     st.sidebar.image("logo.png", width=120)
     st.sidebar.write(f"**Welcome, {name}**")
     
-    # Get user role
     role = credentials["usernames"][username]["role"]
     
-    # ================== LOAD PROPERTIES ==================
+    # Load Properties
     try:
-        prop_sheet = client.open("Properties").sheet1
-        prop_values = prop_sheet.get_all_values()
+        # Replace with your Properties sheet URL if different
+        prop_spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/18A7jnCqSsk1ojD5Wr_66BlmOK3kGZl0P1sn2zRMhgD8/edit?gid=0#gid=0")
+        prop_values = prop_spreadsheet.sheet1.get_all_values()
         if len(prop_values) > 1:
             prop_df = pd.DataFrame(prop_values[1:], columns=prop_values[0])
         else:
@@ -229,24 +163,22 @@ if authentication_status:
         st.warning("Could not load Properties sheet.")
         prop_df = pd.DataFrame()
     
-    # Filter properties by role
+    # Filter by role
     if role == "client" and not prop_df.empty and "Username" in prop_df.columns:
         user_props = prop_df[prop_df["Username"] == username]
     else:
         user_props = prop_df.copy()
     
-    # ================== DISPLAY PROPERTIES ==================
     st.subheader("📍 My Properties")
     if not user_props.empty:
         st.dataframe(user_props, use_container_width=True)
     else:
         st.info("No properties assigned to you yet.")
     
-    # ================== ADMIN SECTION ==================
+    # Admin: Add User
     if role == "admin":
         st.sidebar.markdown("---")
         st.sidebar.subheader("➕ Add New User")
-        
         with st.sidebar.form("add_user_form", clear_on_submit=True):
             new_name = st.text_input("Full Name")
             new_username = st.text_input("Username")
@@ -258,52 +190,14 @@ if authentication_status:
                     if new_username in credentials["usernames"]:
                         st.error("Username already exists!")
                     else:
-                        # Hash the password (recommended current method)
                         hashed_pw = stauth.Hasher([new_password]).generate()[0]
-                        
-                        user_sheet = client.open("Users").sheet1
+                        user_sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1LmmZNAT0jFVHY1ZqseyiS9kzrFnbLB3ak2abDRTH6Ms").sheet1
                         user_sheet.append_row([new_name, new_username, hashed_pw, new_role])
-                        
-                        st.success(f"✅ User **{new_username}** created successfully!")
-                        st.cache_data.clear()   # refresh users
+                        st.success(f"✅ User **{new_username}** created!")
+                        st.cache_data.clear()
                         st.rerun()
                 else:
                     st.error("Please fill all fields")
-        
-        # One-time re-hash button (very useful now)
-        st.sidebar.markdown("---")
-        if st.sidebar.button("🔐 Re-hash ALL passwords in sheet (one-time only)"):
-            with st.spinner("Re-hashing passwords..."):
-                sheet = client.open("Users").sheet1
-                data = sheet.get_all_values()
-                if len(data) < 2:
-                    st.error("No users found")
-                else:
-                    headers = data[0]
-                    rows = data[1:]
-                    pw_idx = headers.index("Password") if "Password" in headers else None
-                    
-                    if pw_idx is None:
-                        st.error("Password column not found")
-                    else:
-                        updated = []
-                        for row in rows:
-                            new_row = list(row)
-                            current_pw = str(new_row[pw_idx]).strip()
-                            # Only hash if it doesn't look like bcrypt already
-                            if not (current_pw.startswith("$2") and len(current_pw) > 50):
-                                try:
-                                    new_hash = stauth.Hasher([current_pw]).generate()[0]
-                                    new_row[pw_idx] = new_hash
-                                except:
-                                    pass
-                            updated.append(new_row)
-                        
-                        sheet.clear()
-                        sheet.update([headers] + updated)
-                        st.success("All passwords re-hashed successfully!")
-                        st.cache_data.clear()
-                        st.rerun()
 
 elif authentication_status is False:
     st.error("❌ Incorrect username or password")
