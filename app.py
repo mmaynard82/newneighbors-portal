@@ -85,7 +85,7 @@ for _, row in users_df.iterrows():
 authenticator = stauth.Authenticate(
     credentials,
     cookie_name="new_neighbors_portal",
-    cookie_key="CHANGE_THIS_TO_A_VERY_LONG_RANDOM_STRING_2026_please_make_it_at_least_32_chars",  # ← CHANGE THIS!
+    cookie_key="NewNeighborsPortal2026_x7K9pL2mQ8vR4tY6uZ3wA5bC7dE9fG1hJ",  # ← CHANGE THIS!
     cookie_expiry_days=7,
     auto_hash=False                     # Important: we pre-hash manually
 )
