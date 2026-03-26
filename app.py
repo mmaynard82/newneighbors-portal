@@ -17,7 +17,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================== HEADER ==================
-st.title("🏠 New Neighbors Property Portal")
+st.title("New Neighbors Property Portal")
 
 # ================== GOOGLE SHEETS ==================
 @st.cache_resource
