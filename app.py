@@ -13,17 +13,11 @@ st.markdown("""
 <style>
     .stApp { background-color: #f8fafc; }
     h1, h2, h3 { color: #1e40af; }
-    .stButton>button { background-color: #1e40af; color: white; border-radius: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ================== HEADER ==================
-col1, col2 = st.columns([1, 5])
-with col1:
-    st.image("logo.png", width=90)
-with col2:
-    st.title("New Neighbors Property Portal")
-    st.caption("Property Monitoring Dashboard")
+st.title("🏠 New Neighbors Property Portal")
 
 # ================== GOOGLE SHEETS ==================
 @st.cache_resource
@@ -42,23 +36,38 @@ client = get_client()
 # ================== LOAD USERS ==================
 @st.cache_data(ttl=10)
 def load_users():
-    sheet = client.open("Users").sheet1
-    values = sheet.get_all_values()
-    headers = values[0]
-    return pd.DataFrame(values[1:], columns=headers)
+    try:
+        sheet = client.open("Users").sheet1
+        values = sheet.get_all_values()
+
+        headers = [h.strip() for h in values[0]]
+        rows = values[1:]
+
+        df = pd.DataFrame(rows, columns=headers)
+        return df
+    except Exception as e:
+        st.error(f"Users load error: {e}")
+        return pd.DataFrame(columns=["Name","Username","Password","Role"])
 
 users_df = load_users()
 
-credentials = {
-    "usernames": {
-        str(r["Username"]).strip(): {
-            "name": r["Name"],
-            "password": r["Password"],
-            "role": r.get("Role","client")
-        } for _, r in users_df.iterrows()
-    }
-}
+# ================== BUILD CREDENTIALS ==================
+credentials = {"usernames": {}}
 
+for _, row in users_df.iterrows():
+    username = str(row.get("Username","")).strip()
+    password = str(row.get("Password","")).strip()
+    name = str(row.get("Name","")).strip()
+    role = str(row.get("Role","client")).strip().lower()
+
+    if username:
+        credentials["usernames"][username] = {
+            "name": name,
+            "password": password,
+            "role": role
+        }
+
+# ================== AUTH ==================
 authenticator = stauth.Authenticate(
     credentials,
     "cookie",
@@ -67,10 +76,9 @@ authenticator = stauth.Authenticate(
     auto_hash=False
 )
 
-# ================== LOGIN ==================
 name, authentication_status, username = authenticator.login("main", "Login")
 
-# ================== MAIN APP ==================
+# ================== MAIN ==================
 if authentication_status:
 
     authenticator.logout("Logout", "sidebar")
@@ -81,40 +89,76 @@ if authentication_status:
     # ================== LOAD PROPERTIES ==================
     @st.cache_data(ttl=30)
     def load_properties():
-        sheet = client.open("Properties").sheet1
-        values = sheet.get_all_values()
-        return pd.DataFrame(values[1:], columns=values[0])
+        try:
+            sheet = client.open("Properties").sheet1
+            values = sheet.get_all_values()
+
+            headers = [h.strip() for h in values[0] if h]
+            rows = [r[:len(headers)] for r in values[1:]]
+
+            df = pd.DataFrame(rows, columns=headers)
+            df.columns = [c.strip() for c in df.columns]
+
+            return df
+
+        except Exception as e:
+            st.error(f"Properties load error: {e}")
+            return pd.DataFrame()
 
     prop_df = load_properties()
 
     # ================== FILTER PROPERTIES ==================
-    if role == "client":
-        prop_df = prop_df[prop_df["Username"] == username]
+    if role == "client" and "Username" in prop_df.columns:
+        prop_df = prop_df[
+            prop_df["Username"].astype(str).str.strip() == username
+        ]
 
     # ================== JOTFORM ==================
     @st.cache_data(ttl=60)
     def get_jotform():
-        url = f"https://api.jotform.com/user/submissions?apiKey={st.secrets['JOTFORM_API_KEY']}"
-        res = requests.get(url).json()
+        try:
+            url = f"https://api.jotform.com/user/submissions?apiKey={st.secrets['JOTFORM_API_KEY']}"
+            res = requests.get(url)
 
-        records = []
-        for sub in res["content"]:
-            rec = {"CreatedAt": sub["created_at"]}
-            for v in sub["answers"].values():
-                rec[v["text"]] = v.get("answer", "")
-            records.append(rec)
+            if res.status_code != 200:
+                return pd.DataFrame()
 
-        df = pd.DataFrame(records)
-        if not df.empty:
-            df["CreatedAt"] = pd.to_datetime(df["CreatedAt"])
-        return df
+            data = res.json()
+            if "content" not in data:
+                return pd.DataFrame()
+
+            records = []
+
+            for sub in data["content"]:
+                rec = {"CreatedAt": sub.get("created_at")}
+
+                answers = sub.get("answers", {})
+                for v in answers.values():
+                    question = v.get("text", "")
+                    answer = v.get("answer", "")
+                    rec[question] = answer
+
+                records.append(rec)
+
+            df = pd.DataFrame(records)
+
+            if not df.empty and "CreatedAt" in df.columns:
+                df["CreatedAt"] = pd.to_datetime(df["CreatedAt"], errors="coerce")
+
+            return df
+
+        except Exception as e:
+            st.warning(f"Jotform error: {e}")
+            return pd.DataFrame()
 
     insp_df = get_jotform()
 
     # ================== FILTER INSPECTIONS ==================
     if not insp_df.empty and "Username" in insp_df.columns:
         if role == "client":
-            insp_df = insp_df[insp_df["Username"] == username]
+            insp_df = insp_df[
+                insp_df["Username"].astype(str).str.strip() == username
+            ]
 
     # ================== TABS ==================
     tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "🏠 Properties", "📝 Inspections"])
@@ -123,15 +167,13 @@ if authentication_status:
     with tab1:
         st.subheader("📊 Overview")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Properties", len(prop_df))
-        col2.metric("Inspections", len(insp_df))
+        st.metric("Properties", len(prop_df))
+        st.metric("Inspections", len(insp_df))
 
         if "Status" in insp_df.columns:
-            col3.metric("Failed", (insp_df["Status"] == "Failed").sum())
+            st.metric("Failed", (insp_df["Status"] == "Failed").sum())
 
-        # Deal rot
-        if "CreatedAt" in insp_df.columns:
+        if "CreatedAt" in insp_df.columns and not insp_df.empty:
             insp_df["Days Old"] = (pd.Timestamp.now() - insp_df["CreatedAt"]).dt.days
             old = insp_df[insp_df["Days Old"] > 7]
 
@@ -142,22 +184,27 @@ if authentication_status:
             else:
                 st.success("No aging inspections")
 
-        # Chart
-        if "Status" in insp_df.columns:
-            st.bar_chart(insp_df["Status"].value_counts())
-
     # ================== PROPERTIES ==================
     with tab2:
         st.subheader("🏠 Properties")
-        st.dataframe(prop_df, use_container_width=True)
+
+        if prop_df.empty:
+            st.info("No properties found.")
+        else:
+            st.dataframe(prop_df, use_container_width=True)
 
     # ================== INSPECTIONS ==================
     with tab3:
         st.subheader("📝 Inspections")
-        st.dataframe(insp_df, use_container_width=True)
+
+        if insp_df.empty:
+            st.info("No inspections found.")
+        else:
+            st.dataframe(insp_df, use_container_width=True)
 
 # ================== LOGIN STATES ==================
 elif authentication_status is False:
     st.error("❌ Incorrect username or password")
+
 elif authentication_status is None:
-    st.warning("👤 Please enter your login details")
+    st.warning("👤 Please enter login details")
